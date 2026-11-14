@@ -28,7 +28,7 @@ The task bodies live in a plain Python package. The DAG file only wires them tog
 | A sensor sends 999 °C | Range checks set the value to `NULL`, keep the hour and record why in `qc_flags`. Too many NULLs for a measure (> 10%) fails the day |
 | Backfilling a month must not hammer the API | Every `extract` runs in the **`open_meteo_api` pool** (2 slots) with `max_active_runs=3` |
 | Re-running a day must not duplicate rows | Loads are scoped to the **data interval**: upsert on `(city_id, observed_at)` plus delete-and-rebuild of that city-day's summary, in one transaction. Raw files are overwritten per interval |
-| Nobody notices a late or failed run | `sla` on `transform_load`, plus `on_failure_callback` and `sla_miss_callback` that log a structured `ALERT` line ready for any log-based alerting |
+| Nobody notices a late or failed run | `sla` on `report`, the step that runs once every city has loaded (Airflow has no SLAs on mapped tasks), plus `on_failure_callback` and `sla_miss_callback` that log a structured `ALERT` line ready for any log-based alerting |
 | Downstream jobs run on a timer and read stale data | `transform_load` publishes a **Dataset** (`postgres://weather_db/public/daily_summary`), so consumers can be scheduled on fresh data instead |
 | One slow city blocks the rest | **Dynamic task mapping**: one `extract` and one `transform_load` per city, so a city can fail and retry on its own. `report` uses `trigger_rule="all_done"` |
 
@@ -71,7 +71,7 @@ def weather_etl():
     city_ids = cities()
     create_tables() >> city_ids
     extracted = extract.expand(city_id=city_ids)                         # pool="open_meteo_api"
-    report(transform_load.expand(extracted=extracted))                   # sla=60 min, outlets=[Dataset]
+    report(transform_load.expand(extracted=extracted))                   # outlets=[Dataset]; report: sla=60 min
 ```
 
 Full file: [`dags/weather_etl_dag.py`](dags/weather_etl_dag.py). Task bodies: [`tasks.py`](src/weather_etl/tasks.py), [`client.py`](src/weather_etl/client.py), [`transform.py`](src/weather_etl/transform.py), [`quality.py`](src/weather_etl/quality.py), [`load.py`](src/weather_etl/load.py).
