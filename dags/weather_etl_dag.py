@@ -5,7 +5,8 @@ Orchestration features on show:
 * TaskFlow API with dynamic task mapping (one `extract`/`transform_load` pair per city)
 * retries with exponential backoff, a max retry delay and an execution timeout per task
 * a pool (`open_meteo_api`) that caps concurrent calls to the free API during backfills
-* an SLA on the load step, plus failure and SLA-miss callbacks that log a structured alert
+* an SLA on the final `report` step (Airflow 2 has no SLAs on mapped tasks), plus failure and SLA-miss
+  callbacks that log a structured alert
 * `catchup=True` + idempotent, data-interval-based loads, so backfills and `tasks clear` are safe
 * a Dataset outlet so downstream DAGs can be scheduled on fresh data instead of on a clock
 
@@ -106,7 +107,7 @@ def weather_etl():
             log.warning("%s: %d HTTP retries: %s", city_id, len(retried), retried)
         return {"city_id": city_id, "path": out["path"]}
 
-    @task(sla=timedelta(minutes=SETTINGS.sla_minutes), outlets=[DAILY_SUMMARY])
+    @task(outlets=[DAILY_SUMMARY])
     def transform_load(extracted: dict, data_interval_start=None, run_id=None, ti=None) -> dict:
         from weather_etl.tasks import transform_load as load_day
 
@@ -114,7 +115,9 @@ def weather_etl():
                        ti.try_number)
         return {"city_id": extracted["city_id"], "rows": res["rows"], "flagged": res["flagged"]}
 
-    @task(trigger_rule="all_done")
+    # The SLA sits here because Airflow rejects SLAs on mapped tasks. `report` runs once every city has
+    # loaded, so it measures the same thing: the whole day landed within the SLA.
+    @task(trigger_rule="all_done", sla=timedelta(minutes=SETTINGS.sla_minutes))
     def report(results: list[dict], data_interval_start=None) -> None:
         loaded = [r for r in results if r]
         log.info("%s: loaded %d cities, %d rows, %d flagged hours", data_interval_start.date(), len(loaded),

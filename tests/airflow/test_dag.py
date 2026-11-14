@@ -23,5 +23,6 @@ def test_structure_and_policy(dagbag):
     extract, load = dag.get_task("extract"), dag.get_task("transform_load")
     assert extract.pool == "open_meteo_api"
     assert load.retries == 3 and load.retry_exponential_backoff
-    assert load.sla is not None and load.outlets
-    assert dag.get_task("report").trigger_rule == "all_done"
+    assert load.outlets and load.sla is None  # Airflow rejects SLAs on mapped tasks
+    report = dag.get_task("report")
+    assert report.trigger_rule == "all_done" and report.sla is not None
