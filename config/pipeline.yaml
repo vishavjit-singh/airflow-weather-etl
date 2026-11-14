@@ -1,0 +1,30 @@
+# Weather ETL configuration, shared by the Airflow DAG and the local runner.
+source:
+  base_url: https://archive-api.open-meteo.com/v1/archive   # free, no API key
+  hourly: [temperature_2m, relative_humidity_2m, precipitation, wind_speed_10m]
+  timeout_s: 20
+  max_attempts: 5            # per HTTP request; 429/5xx/timeouts are retried
+  backoff_base_s: 1.0        # 1, 2, 4, 8 s (+ jitter), or Retry-After when the API sends it
+  backoff_max_s: 30
+
+cities:
+  - {id: chandigarh, name: Chandigarh, lat: 30.7333, lon: 76.7794, timezone: Asia/Kolkata}
+  - {id: ludhiana, name: Ludhiana, lat: 30.9010, lon: 75.8573, timezone: Asia/Kolkata}
+  - {id: jaipur, name: Jaipur, lat: 26.9124, lon: 75.7873, timezone: Asia/Kolkata}
+  - {id: delhi, name: New Delhi, lat: 28.6139, lon: 77.2090, timezone: Asia/Kolkata}
+  - {id: mumbai, name: Mumbai, lat: 19.0760, lon: 72.8777, timezone: Asia/Kolkata}
+  - {id: bengaluru, name: Bengaluru, lat: 12.9716, lon: 77.5946, timezone: Asia/Kolkata}
+
+quality:
+  expected_hours: 24
+  min_hours: 22                      # fewer → the day is incomplete: fail the task so Airflow retries
+  max_null_share: 0.10               # per measure and city-day
+  ranges:
+    temperature_2m: [-30, 55]
+    relative_humidity_2m: [0, 100]
+    precipitation: [0, 150]
+    wind_speed_10m: [0, 200]
+
+schedule:
+  start_date: "2026-10-01"
+  sla_minutes: 60                    # load must finish within an hour of the run starting

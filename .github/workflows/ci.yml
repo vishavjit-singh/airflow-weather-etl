@@ -1,0 +1,92 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: lint, tests (SQLite + PostgreSQL), demo
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: weather
+          POSTGRES_PASSWORD: weather
+          POSTGRES_DB: weather
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U weather" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      PG_DSN: postgresql://weather:weather@localhost:5432/weather
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - run: pip install -r requirements-dev.txt
+      - run: ruff check .
+      - run: pytest -q
+      - run: make demo
+      - uses: actions/upload-artifact@v4
+        if: matrix.python-version == '3.12'
+        with:
+          name: report-images
+          path: docs/images/*.png
+
+  airflow:
+    name: Airflow 2.10 — DAG checks and a real `airflow dags test` run
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: weather
+          POSTGRES_PASSWORD: weather
+          POSTGRES_DB: weather
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U weather" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      AIRFLOW_HOME: ${{ github.workspace }}/.airflow
+      AIRFLOW__CORE__DAGS_FOLDER: ${{ github.workspace }}/dags
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW_CONN_WEATHER_DB: postgresql://weather:weather@localhost:5432/weather
+      PYTHONPATH: ${{ github.workspace }}/src
+      WEATHER_SOURCE: fixture
+      WEATHER_RAW_DIR: ${{ github.workspace }}/data/raw
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install Airflow with its constraints
+        run: |
+          pip install "apache-airflow==2.10.3" "apache-airflow-providers-postgres" pytest \
+            --constraint "https://raw.githubusercontent.com/apache/airflow/constraints-2.10.3/constraints-3.11.txt"
+          pip install -r requirements.txt
+      - run: airflow db migrate
+      - run: airflow pools set open_meteo_api 2 "Open-Meteo free tier"
+      - run: pytest -q -m airflow tests/airflow
+      - name: Run one DAG run end to end (HTTP retries happen on this date)
+        run: airflow dags test weather_etl 2026-10-02
+      - name: Check what landed in PostgreSQL
+        run: |
+          psql postgresql://weather:weather@localhost:5432/weather -c \
+            "SELECT city_id, day, hours, temp_min, temp_max, precip_total FROM daily_summary ORDER BY city_id"
+          test "$(psql -tA postgresql://weather:weather@localhost:5432/weather -c \
+            "SELECT COUNT(*) FROM hourly_observations")" = "144"
+
+  docker:
+    name: docker compose config + image build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker compose config --quiet
+      - run: docker compose build

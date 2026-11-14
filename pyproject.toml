@@ -1,0 +1,19 @@
+[project]
+name = "airflow-weather-etl"
+version = "1.0.0"
+description = "Airflow-orchestrated weather ETL: Open-Meteo → PostgreSQL with retries, SLAs, data-quality checks and idempotent backfills."
+authors = [{ name = "Vishavjit Singh Saini" }]
+requires-python = ">=3.10"
+license = { text = "MIT" }
+
+[tool.pytest.ini_options]
+pythonpath = ["src", "."]
+testpaths = ["tests"]
+markers = ["airflow: needs apache-airflow (CI airflow job)", "postgres: needs PG_DSN (CI airflow job)"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W"]
